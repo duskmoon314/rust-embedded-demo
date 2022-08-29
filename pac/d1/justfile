@@ -1,0 +1,44 @@
+# TOOLS
+OBJDUMP := "rust-objdump --arch-name=riscv64"
+OBJCOPY := "rust-objcopy --binary-architecture=riscv64"
+XFEL := "xfel"
+
+# BUILD CONFIG
+TARGET := "riscv64gc-unknown-none-elf"
+MODE := env_var_or_default("MODE", "debug")
+APP_ELF_PREFIX := join("../../target", TARGET, MODE)
+BASE_ADDRESS := "0x80000000"
+
+# ENV
+export RUSTFLAGS := "-Clink-arg=-Tpac/d1/src/linker.ld"
+
+env:
+    (rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
+    cargo install cargo-binutils
+    rustup component add rust-src
+    rustup component add llvm-tools-preview
+
+build_inner:
+    @if [ {{MODE}} == "release" ]; then                                 \
+        cargo build --release --target {{TARGET}};                      \
+    else                                                                \
+        cargo build --target {{TARGET}};                                \
+    fi
+    @for file in `ls src/bin`; do                                       \
+        elf="{{APP_ELF_PREFIX}}/$(basename $file .rs)";                 \
+        {{OBJCOPY}} $elf --strip-all -O binary ${elf}.bin;              \
+    done
+
+build: env build_inner
+
+flash soc="d1" bin="uart": build
+    @{{XFEL}} version
+    @{{XFEL}} ddr {{soc}}
+    @{{XFEL}} write {{BASE_ADDRESS}} "{{APP_ELF_PREFIX}}/{{bin}}.bin"
+
+# run soc=d1 bin=uart: (flash soc bin)
+#     @{{XFEL}} exec {{BASE_ADDRESS}}
+
+exec:
+    # SHOULD flash first
+    @{{XFEL}} exec {{BASE_ADDRESS}}

@@ -1,0 +1,41 @@
+# TOOLS
+OBJDUMP := "rust-objdump --arch-name=arm"
+OBJCOPY := "rust-objcopy --binary-architecture=arm"
+XFEL := "xfel"
+
+# BUILD CONFIG
+TARGET := "armv7a-none-eabi"
+MODE := env_var_or_default("MODE", "debug")
+APP_ELF_PREFIX := join("../../target", TARGET, MODE)
+BASE_ADDRESS := "0x40000000"
+
+# ENV
+export RUSTFLAGS := "-Clink-arg=-Tpac/r528/src/linker.ld"
+
+env:
+    (rustup target list | grep "armv7a-none-eabi (installed)") || rustup target add $(TARGET)
+    cargo install cargo-binutils
+    rustup component add rust-src
+    rustup component add llvm-tools-preview
+
+build_inner:
+    @if [ {{MODE}} == "release" ]; then                                 \
+        cargo build --release --target {{TARGET}};                      \
+    else                                                                \
+        cargo build --target {{TARGET}};                                \
+    fi
+    @for file in `ls src/bin`; do                                       \
+        elf="{{APP_ELF_PREFIX}}/$(basename $file .rs)";                 \
+        {{OBJCOPY}} $elf --strip-all -O binary ${elf}.bin;              \
+    done
+
+build: env build_inner
+
+flash soc="r528-s3" bin="uart": build
+    @{{XFEL}} version
+    @{{XFEL}} ddr {{soc}}
+    {{XFEL}} write {{BASE_ADDRESS}} "{{APP_ELF_PREFIX}}/{{bin}}.bin"
+
+exec:
+    # SHOULD flash first
+    @{{XFEL}} exec {{BASE_ADDRESS}}
